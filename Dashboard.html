@@ -582,13 +582,54 @@
         (function () {
             var dashboardData = window.ZHIHAO_DASHBOARD_DATA || { rows: [] };
             var agentSettings = window.ZHIHAO_AGENT_SETTINGS || {};
-            var sourceRows = dashboardData.rows || [];
-            var useSourceSurplus = sourceRows.some(function (row) {
-                return Object.prototype.hasOwnProperty.call(row, "surplus");
-            });
-            var rows = normalizeRows(sourceRows);
+            var rows = normalizeRows(dashboardData.rows || []);
             var flowChart = null;
             var surplusChart = null;
+            var agentSystemPrompt = [
+                "你是一个专业的“医院耗材数据分析专家”。你的任务是根据提供的结构化医疗耗材流转数据，进行深度的业务诊断。",
+                "请严格遵守以下规则：",
+                "- 只允许基于用户提供的数据进行分析，绝对禁止编造、伪造或猜测未提供的数据。",
+                "- 你的语言必须精炼、客观、专业，不要使用任何寒暄或废话。",
+                "- 必须先基于 payload.items 复述计算后的实际盈余数据，再给出趋势、预测或管理判断。",
+                "- 没有断供风险或库存积压时，也要基于实际盈余、消耗速度、可用天数和趋势给出客观结论；不要只输出“未见明显异常”。"
+            ].join("\n");
+            var replenishmentTaskPrompt = [
+                "【输入数据】",
+                "以下是本周期内重点卫材的进销存聚合数据（JSON 格式），由 payload.items、payload.totals、payload.rows 提供。payload.items 是系统已计算好的重点指标，必须优先使用。",
+                "",
+                "【分析任务】",
+                "请你对上述耗材的盈余与补货情况进行深度分析。请按照以下思考步骤执行：",
+                "步骤1（实际盈余）：逐项列出 item_name、spec、batch、current_surplus、period_dispense、period_avg_daily_consumption、estimated_days_to_depletion。current_surplus <= 0 时必须表述为“当前已透支/已耗尽，预计可用 0 天”，不得输出负数耗尽天数。",
+                "步骤2（趋势与预测）：结合 latest_month、latest_month_dispense、surplus_change_from_previous_month、period_avg_daily_consumption 判断盈余是在改善、恶化还是稳定；可以给出短期预测，但必须说明依据来自 payload.items 或 payload.rows。",
+                "步骤3（异常定位）：找出预计耗尽天数低于 7 天、当前盈余小于等于 0 的断供风险耗材；对高盈余且低消耗或无消耗的耗材标记库存积压。不得使用输入数据之外的入库周期、消耗量或阈值。",
+                "步骤4（行动建议）：针对发现的问题给出采购、调拨、清库或复核建议。没有明显风险时，也要给出维持观察、复核消耗口径或设置安全库存的建议。",
+                "",
+                "【输出格式约束】",
+                "你必须且只能以 JSON 格式输出，不要包含 Markdown 标记或额外文本。所有文本字段必须是完整、规范、可直接展示的中文句子。JSON 结构如下：",
+                "禁止把 JSON 字符串放入 summary；summary 只能是普通中文判断句。",
+                "{",
+                "  \"summary\": \"一句话概括整体库存健康度，必须包含实际盈余和消耗趋势的判断\",",
+                "  \"actual_surplus\": [",
+                "    {",
+                "      \"item_name\": \"卫材名称\",",
+                "      \"spec\": \"规格\",",
+                "      \"batch\": \"批号\",",
+                "      \"sentence\": \"先给出实际盈余、周期消耗、日均消耗和预计可用天数的规范句子\"",
+                "    }",
+                "  ],",
+                "  \"analysis\": [",
+                "    \"趋势、预测或管理判断的规范句子，必须有数据依据\"",
+                "  ],",
+                "  \"warnings\": [",
+                "    {",
+                "      \"item_name\": \"卫材名称\",",
+                "      \"issue_type\": \"断供风险\" 或 \"库存积压\",",
+                "      \"description\": \"具体的问题描述与数据支撑\",",
+                "      \"recommendation\": \"具体的管理建议\"",
+                "    }",
+                "  ]",
+                "}"
+            ].join("\n");
 
             var els = {
                 dataMeta: document.getElementById("dataMeta"),
@@ -765,11 +806,10 @@
                     map[key].inbound += row.inbound;
                     map[key].dispense += row.dispense;
                     map[key].returnQty += row.returnQty;
-                    map[key].surplus += row.surplus;
                 });
 
                 var aggregated = sortLedgerRows(Object.keys(map).map(function (key) { return map[key]; }), sortBySpec);
-                return useSourceSurplus ? aggregated : recalculateRunningSurplus(aggregated, includeBatch);
+                return recalculateRunningSurplus(aggregated, includeBatch);
             }
 
             function sortLedgerRows(ledgerRows, sortBySpec) {
@@ -917,19 +957,19 @@
             function renderAgentPanel(container, scope, scopedRows) {
                 var version = (Number(container.getAttribute("data-agent-version")) || 0) + 1;
                 container.setAttribute("data-agent-version", String(version));
-                var localHtml = buildLocalInsightHtml(scope, scopedRows);
-                container.innerHTML = localHtml + buildApiNote("本地规则洞察已生成。");
 
                 if (!agentSettings.enabled || !agentSettings.endpoint) {
+                    container.innerHTML = buildLocalInsightHtml(scope, scopedRows) + buildApiNote("本地规则洞察已生成。");
                     return;
                 }
 
+                container.innerHTML = buildApiNote("正在请求外部 Agent 分析...");
                 requestExternalAgent(scope, scopedRows).then(function (html) {
                     if (String(version) !== container.getAttribute("data-agent-version")) return;
-                    container.innerHTML = localHtml + buildApiNote("外部 Agent 返回：") + html;
+                    container.innerHTML = buildApiNote("外部 Agent 返回：") + html;
                 }).catch(function (error) {
                     if (String(version) !== container.getAttribute("data-agent-version")) return;
-                    container.innerHTML = localHtml + buildApiNote("外部 Agent 请求失败：" + escapeHtml(error.message));
+                    container.innerHTML = buildApiNote("外部 Agent 请求失败：" + escapeHtml(error.message));
                 });
             }
 
@@ -969,11 +1009,15 @@
 
             function requestExternalAgent(scope, scopedRows) {
                 var payload = {
-                    task: "分析卫材时间序列周期性，并在某批次或规格的盈余曲线斜率异常下降时提醒补货。",
+                    task: "盈余与补货预警：基于提供数据计算预计耗尽天数，识别断供风险和库存积压，仅输出结构化结论。",
+                    systemPrompt: agentSystemPrompt,
+                    taskPrompt: replenishmentTaskPrompt,
+                    prompt: agentSystemPrompt + "\n\n" + replenishmentTaskPrompt,
                     scope: scope,
                     generatedAt: dashboardData.generatedAt || "",
                     dateRange: { start: els.startDate.value, endExclusive: els.endDate.value },
                     totals: summarize(scopedRows),
+                    items: buildReplenishmentInput(scopedRows),
                     rows: scopedRows.slice(0, 1500)
                 };
 
@@ -995,27 +1039,385 @@
                         if (!response.ok) {
                             throw new Error("HTTP " + response.status + " " + text.slice(0, 120));
                         }
-                        return formatExternalAgentResponse(text);
+                        return formatExternalAgentResponse(text, payload.items);
                     });
                 });
             }
 
-            function formatExternalAgentResponse(text) {
-                var parsed = null;
-                try { parsed = JSON.parse(text); } catch (error) { }
+            function buildReplenishmentInput(scopedRows) {
+                var startDate = parseDate(els.startDate.value);
+                var endDate = parseDate(els.endDate.value);
+                var periodDays = startDate && endDate && endDate > startDate
+                    ? Math.max(1, Math.round((endDate - startDate) / 86400000))
+                    : null;
+                var groups = {};
 
+                scopedRows.forEach(function (row) {
+                    var key = [row.name, row.spec, row.batch].join("\u001f");
+                    if (!groups[key]) {
+                        groups[key] = {
+                            item_name: row.name || "",
+                            spec: row.spec || "",
+                            batch: row.batch || "",
+                            current_surplus: 0,
+                            period_dispense: 0,
+                            period_inbound: 0,
+                            period_return: 0,
+                            latest_month: "",
+                            _months: {}
+                        };
+                    }
+
+                    var item = groups[key];
+                    item.period_dispense += row.dispense;
+                    item.period_inbound += row.inbound;
+                    item.period_return += row.returnQty;
+                    if (!item._months[row.month]) {
+                        item._months[row.month] = { inbound: 0, dispense: 0, returnQty: 0, surplus: row.surplus };
+                    }
+                    item._months[row.month].inbound += row.inbound;
+                    item._months[row.month].dispense += row.dispense;
+                    item._months[row.month].returnQty += row.returnQty;
+                    item._months[row.month].surplus = row.surplus;
+                    if (!item.latest_month || row.month >= item.latest_month) {
+                        item.latest_month = row.month;
+                        item.current_surplus = row.surplus;
+                    }
+                });
+
+                return Object.keys(groups).map(function (key) {
+                    var item = groups[key];
+                    var months = Object.keys(item._months).sort();
+                    var latestMonth = months[months.length - 1] || "";
+                    var previousMonth = months.length > 1 ? months[months.length - 2] : "";
+                    var latestStats = latestMonth ? item._months[latestMonth] : null;
+                    var previousStats = previousMonth ? item._months[previousMonth] : null;
+                    item.period_days = periodDays;
+                    item.near7_avg_daily_consumption = null;
+                    item.period_avg_daily_consumption = periodDays ? round2(item.period_dispense / periodDays) : null;
+                    item.estimated_days_to_depletion = item.period_avg_daily_consumption > 0
+                        ? (item.current_surplus <= 0 ? 0 : round2(item.current_surplus / item.period_avg_daily_consumption))
+                        : null;
+                    item.surplus_status = item.current_surplus <= 0 ? "已透支或已耗尽" : "仍有盈余";
+                    item.latest_month = latestMonth || item.latest_month;
+                    item.previous_month = previousMonth;
+                    item.latest_month_dispense = latestStats ? round2(latestStats.dispense) : null;
+                    item.latest_month_net_change = latestStats ? round2(latestStats.inbound - latestStats.dispense + latestStats.returnQty) : null;
+                    item.surplus_change_from_previous_month = previousStats ? round2(item.current_surplus - previousStats.surplus) : null;
+                    item.estimation_basis = "未提供近7日明细，使用当前筛选周期发药数量 / 周期天数估算日均消耗。";
+                    delete item._months;
+                    return item;
+                }).sort(function (a, b) {
+                    var left = a.estimated_days_to_depletion == null ? Number.POSITIVE_INFINITY : a.estimated_days_to_depletion;
+                    var right = b.estimated_days_to_depletion == null ? Number.POSITIVE_INFINITY : b.estimated_days_to_depletion;
+                    return left - right;
+                }).slice(0, 500);
+            }
+
+            function parseDate(value) {
+                if (!value) return null;
+                var date = new Date(value + "T00:00:00");
+                return Number.isNaN(date.getTime()) ? null : date;
+            }
+
+            function formatExternalAgentResponse(text, computedItems) {
+                var parsed = normalizeAgentPayload(text);
                 if (!parsed) {
                     return "<div class=\"api-note\">" + escapeHtml(text) + "</div>";
                 }
 
-                if (Array.isArray(parsed.insights)) {
+                if (Array.isArray(parsed.insights) && !parsed.summary && !parsed.actual_surplus && !parsed.analysis && !parsed.warnings) {
                     return "<ul>" + parsed.insights.map(function (item) {
                         return "<li>" + escapeHtml(String(item)) + "</li>";
                     }).join("") + "</ul>";
                 }
 
-                var output = parsed.summary || parsed.result || parsed.output_text || parsed.message || JSON.stringify(parsed);
-                return "<div class=\"api-note\">" + escapeHtml(String(output)) + "</div>";
+                return buildFormattedAgentHtml(parsed, computedItems || []);
+            }
+
+            function normalizeAgentPayload(value) {
+                var parsed = value;
+                for (var i = 0; i < 5; i++) {
+                    if (typeof parsed === "string") {
+                        var text = parsed.trim();
+                        if (!text) return null;
+                        var parsedText = parseJsonCandidate(text);
+                        if (parsedText) {
+                            parsed = parsedText;
+                            continue;
+                        }
+                        return { summary: stripJsonLikeNoise(text) };
+                    }
+
+                    if (parsed && typeof parsed === "object") {
+                        var nested = parsed.summary || parsed.result || parsed.output_text || parsed.message;
+                        if (typeof nested === "string") {
+                            var parsedNested = parseJsonCandidate(nested);
+                            if (parsedNested && hasAgentResultShape(parsedNested)) {
+                                parsed = parsedNested;
+                                continue;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                return parsed && typeof parsed === "object" ? parsed : null;
+            }
+
+            function parseJsonCandidate(value) {
+                var text = String(value || "").trim();
+                if (!text) return null;
+
+                text = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+
+                try {
+                    return JSON.parse(text);
+                } catch (error) {
+                }
+
+                var objectText = extractFirstJsonObject(text);
+                if (objectText) {
+                    try {
+                        return JSON.parse(objectText);
+                    } catch (error) {
+                    }
+                }
+
+                return null;
+            }
+
+            function extractFirstJsonObject(text) {
+                var start = String(text || "").indexOf("{");
+                if (start < 0) return "";
+
+                var inString = false;
+                var escaped = false;
+                var depth = 0;
+                for (var i = start; i < text.length; i++) {
+                    var ch = text.charAt(i);
+                    if (escaped) {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (ch === "\\" && inString) {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (ch === "\"") {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString) continue;
+
+                    if (ch === "{") {
+                        depth++;
+                    } else if (ch === "}") {
+                        depth--;
+                        if (depth === 0) {
+                            return text.slice(start, i + 1);
+                        }
+                    }
+                }
+
+                return "";
+            }
+
+            function hasAgentResultShape(value) {
+                return value && typeof value === "object" &&
+                    (Object.prototype.hasOwnProperty.call(value, "summary") ||
+                        Object.prototype.hasOwnProperty.call(value, "actual_surplus") ||
+                        Object.prototype.hasOwnProperty.call(value, "analysis") ||
+                        Object.prototype.hasOwnProperty.call(value, "warnings"));
+            }
+
+            function stripJsonLikeNoise(value) {
+                var text = String(value || "").trim();
+                if (text.indexOf("{") >= 0 && text.indexOf("\"summary\"") >= 0) {
+                    return "";
+                }
+                return text;
+            }
+
+            function looksLikeJson(value) {
+                value = String(value || "").trim();
+                return (value.charAt(0) === "{" && value.charAt(value.length - 1) === "}")
+                    || (value.charAt(0) === "[" && value.charAt(value.length - 1) === "]");
+            }
+
+            function buildFormattedAgentHtml(parsed, computedItems) {
+                var blocks = [];
+                blocks.push("<p><strong>实际盈余数据：</strong></p>");
+                blocks.push(buildActualSurplusList(parsed.actual_surplus, computedItems));
+
+                var warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+                if (!warnings.length) {
+                    warnings = buildComputedWarnings(computedItems);
+                }
+
+                var summary = typeof parsed.summary === "string" ? stripJsonLikeNoise(parsed.summary) : "";
+                if (!summary) {
+                    summary = buildComputedSummary(computedItems, warnings);
+                }
+                if (summary && !looksLikeJson(summary)) {
+                    blocks.push("<p><strong>总体判断：</strong>" + escapeHtml(summary) + "</p>");
+                }
+
+                var analysis = normalizeTextArray(parsed.analysis || parsed.trend_analysis || parsed.predictions);
+                if (analysis.length) {
+                    blocks.push("<p><strong>趋势与预测判断：</strong></p>");
+                    blocks.push("<ul>" + analysis.map(function (sentence) {
+                        return "<li>" + escapeHtml(sentence) + "</li>";
+                    }).join("") + "</ul>");
+                }
+
+                blocks.push("<p><strong>风险与建议：</strong></p>");
+                if (warnings.length) {
+                    blocks.push("<ul>" + warnings.map(function (warning) {
+                        return "<li>" + formatWarningSentence(warning) + "</li>";
+                    }).join("") + "</ul>");
+                } else {
+                    blocks.push("<p>基于当前筛选周期的实际盈余和消耗速度，暂未识别到预计 7 天内耗尽的断供风险；建议继续跟踪最新月消耗变化，并复核低消耗高盈余批次是否存在库存积压。</p>");
+                }
+
+                return blocks.join("");
+            }
+
+            function buildComputedSummary(computedItems, warnings) {
+                var items = computedItems || [];
+                if (!items.length) {
+                    return "当前筛选范围没有可计算的库存盈余数据，无法形成可靠的补货判断。";
+                }
+
+                var totalSurplus = items.reduce(function (sum, item) {
+                    return sum + Number(item.current_surplus || 0);
+                }, 0);
+                var stockoutCount = (warnings || []).filter(function (warning) {
+                    return warning.issue_type === "断供风险";
+                }).length;
+                var overstockCount = (warnings || []).filter(function (warning) {
+                    return warning.issue_type === "库存积压";
+                }).length;
+
+                return "当前筛选范围共 " + items.length + " 个批次，合计实际盈余 " + formatNumber(totalSurplus) +
+                    "；其中 " + stockoutCount + " 个批次存在断供风险，" + overstockCount +
+                    " 个批次存在库存覆盖偏长或积压迹象。";
+            }
+
+            function buildComputedWarnings(computedItems) {
+                var warnings = [];
+                (computedItems || []).forEach(function (item) {
+                    if (!item) return;
+                    var exhausted = item.current_surplus <= 0;
+                    var shortDays = item.estimated_days_to_depletion != null && item.estimated_days_to_depletion <= 7;
+                    var overstock = item.current_surplus > 0 &&
+                        ((item.estimated_days_to_depletion != null && item.estimated_days_to_depletion >= 180) ||
+                            Number(item.period_dispense || 0) === 0);
+                    var daysText = item.estimated_days_to_depletion == null ? "无法计算" : formatNumber(item.estimated_days_to_depletion) + "天";
+
+                    if (exhausted || shortDays) {
+                        warnings.push({
+                            item_name: item.item_name || "-",
+                            spec: item.spec || "",
+                            batch: item.batch || "",
+                            issue_type: "断供风险",
+                            description: exhausted
+                                ? "当前实际盈余为 " + formatNumber(item.current_surplus) + "，已透支或已耗尽；本周期发药 " + formatNumber(item.period_dispense) + "，周期日均消耗 " + formatNullableNumber(item.period_avg_daily_consumption) + "。"
+                                : "当前实际盈余为 " + formatNumber(item.current_surplus) + "，按当前消耗速度预计可用 " + daysText + "，低于 7 天预警线。",
+                            recommendation: exhausted
+                                ? "立即复核账实一致性和批次领用记录，确认临床仍需使用时优先补货或跨科室调拨。"
+                                : "纳入补货清单，并结合最新月发药量校准安全库存。"
+                        });
+                    } else if (overstock) {
+                        warnings.push({
+                            item_name: item.item_name || "-",
+                            spec: item.spec || "",
+                            batch: item.batch || "",
+                            issue_type: "库存积压",
+                            description: "当前实际盈余为 " + formatNumber(item.current_surplus) + "，本周期发药 " + formatNumber(item.period_dispense) + "，预计可用 " + daysText + "，库存覆盖明显偏长。",
+                            recommendation: "暂停或降低该批次补货优先级，优先清理近效期库存，并核对是否存在规格替代或批次拆分导致的低消耗。"
+                        });
+                    }
+                });
+
+                return warnings.slice(0, 12);
+            }
+
+            function buildActualSurplusList(actualSurplus, computedItems) {
+                var sentences = [];
+                if (Array.isArray(actualSurplus)) {
+                    actualSurplus.forEach(function (item) {
+                        if (item && item.sentence) {
+                            sentences.push(String(item.sentence));
+                        }
+                    });
+                }
+
+                if (!sentences.length) {
+                    var limit = Math.min(computedItems.length, 12);
+                    for (var i = 0; i < limit; i++) {
+                        sentences.push(buildComputedSurplusSentence(computedItems[i]));
+                    }
+                    if (computedItems.length > limit) {
+                        sentences.push("其余 " + (computedItems.length - limit) + " 个批次未展开，建议在明细表中按预计可用天数继续筛查。");
+                    }
+                }
+
+                if (!sentences.length) {
+                    sentences.push("当前筛选范围没有可计算的盈余数据。");
+                }
+
+                return "<ul>" + sentences.map(function (sentence) {
+                    return "<li>" + escapeHtml(sentence) + "</li>";
+                }).join("") + "</ul>";
+            }
+
+            function buildComputedSurplusSentence(item) {
+                if (!item) return "当前筛选范围没有可计算的盈余数据。";
+                var label = [item.item_name || "-", item.spec || "-", item.batch ? "批号" + item.batch : "无批号"].join(" / ");
+                var days = item.estimated_days_to_depletion == null
+                    ? "无法计算"
+                    : formatNumber(item.estimated_days_to_depletion) + " 天";
+                var status = item.current_surplus <= 0
+                    ? "当前已透支或已耗尽，预计可用 0 天"
+                    : "当前实际盈余为 " + formatNumber(item.current_surplus) + "，预计可用 " + days;
+                var trend = item.surplus_change_from_previous_month == null
+                    ? "暂无上月对比"
+                    : "较上月变化 " + formatNumber(item.surplus_change_from_previous_month);
+                return label + "：" + status + "；本周期发药 " + formatNumber(item.period_dispense) +
+                    "，周期日均消耗 " + formatNullableNumber(item.period_avg_daily_consumption) +
+                    "；最新月发药 " + formatNullableNumber(item.latest_month_dispense) +
+                    "，" + trend + "。";
+            }
+
+            function normalizeTextArray(value) {
+                if (!value) return [];
+                if (Array.isArray(value)) {
+                    return value.map(function (item) {
+                        if (item == null) return "";
+                        if (typeof item === "string") return item;
+                        return item.sentence || item.description || JSON.stringify(item);
+                    }).filter(function (item) { return String(item).trim(); });
+                }
+                return [String(value)];
+            }
+
+            function formatWarningSentence(warning) {
+                if (!warning || typeof warning !== "object") {
+                    return escapeHtml(String(warning || ""));
+                }
+
+                var item = [warning.item_name || "-", warning.spec || "", warning.batch ? "批号" + warning.batch : ""]
+                    .filter(function (part) { return String(part).trim(); })
+                    .join(" / ");
+                var issue = warning.issue_type || "风险提示";
+                var description = warning.description || "";
+                var recommendation = warning.recommendation || "";
+                return "<strong>" + escapeHtml(item) + "</strong> [" + escapeHtml(issue) + "] " +
+                    escapeHtml(description) + (recommendation ? " 建议：" + escapeHtml(recommendation) : "");
             }
 
             function buildApiNote(text) {
@@ -1179,6 +1581,10 @@
 
             function formatNumber(value) {
                 return round2(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+            }
+
+            function formatNullableNumber(value) {
+                return value == null || Number.isNaN(Number(value)) ? "无法计算" : formatNumber(value);
             }
 
             function round2(value) {
