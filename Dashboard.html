@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智耗管家 - 振武医院耗材筛选统计系统</title>
+    <script src="AgentSettings.js"></script>
+    <script src="DashboardData.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        :root {
+            --bg: #f6f8fb;
+            --surface: #ffffff;
+            --surface-soft: #f8fafc;
+            --text: #0f172a;
+            --muted: #64748b;
+            --line: #d7dee8;
+            --blue: #2563eb;
+            --indigo: #4f46e5;
+            --green: #059669;
+            --amber: #d97706;
+            --rose: #e11d48;
+            --shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        button, input, select {
+            font: inherit;
+        }
+
+        .app {
+            width: min(1440px, calc(100vw - 40px));
+            margin: 0 auto;
+            padding: 24px 0 38px;
+        }
+
+        .app-header {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 18px;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: 28px;
+            line-height: 1.2;
+            font-weight: 800;
+            color: var(--text);
+        }
+
+        .brand p {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .meta {
+            min-width: 280px;
+            padding: 12px 14px;
+            border: 1px solid var(--line);
+            background: var(--surface);
+            border-radius: 8px;
+            color: var(--muted);
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+        }
+
+        .board {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+        }
+
+        .board + .board {
+            margin-top: 28px;
+        }
+
+        .board-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 18px;
+            margin-bottom: 16px;
+        }
+
+        .board-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .accent {
+            width: 4px;
+            height: 22px;
+            border-radius: 2px;
+            background: var(--blue);
+        }
+
+        .accent.indigo { background: var(--indigo); }
+
+        h2 {
+            margin: 0;
+            font-size: 18px;
+            line-height: 1.25;
+            font-weight: 800;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface-soft);
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .field input, .field select {
+            border: 0;
+            outline: 0;
+            background: transparent;
+            color: var(--text);
+            min-width: 148px;
+        }
+
+        .field select {
+            min-width: 260px;
+            cursor: pointer;
+        }
+
+        .field.checkbox-field {
+            cursor: pointer;
+        }
+
+        .field.checkbox-field input {
+            width: 16px;
+            min-width: 16px;
+            height: 16px;
+            margin: 0;
+        }
+
+        .hint {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(140px, 1fr));
+            gap: 12px;
+            margin: 14px 0 18px;
+        }
+
+        .metric {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface-soft);
+            padding: 12px 14px;
+            min-height: 74px;
+        }
+
+        .metric span {
+            display: block;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .metric strong {
+            display: block;
+            margin-top: 5px;
+            font-size: 23px;
+            line-height: 1.15;
+            font-weight: 800;
+        }
+
+        .metric.in strong { color: var(--green); }
+        .metric.out strong { color: var(--amber); }
+        .metric.return strong { color: var(--rose); }
+        .metric.surplus strong { color: var(--blue); }
+
+        .table-wrap {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            overflow: auto;
+            max-height: 520px;
+            background: var(--surface);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            white-space: nowrap;
+        }
+
+        th, td {
+            padding: 11px 12px;
+            border-bottom: 1px solid #e8edf4;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #eef3f8;
+            color: #334155;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .hide-batch .batch-cell {
+            display: none;
+        }
+
+        tbody tr:hover {
+            background: #f7fbff;
+        }
+
+        .num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .name-cell {
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .empty-name {
+            color: #94a3b8;
+            font-style: italic;
+            font-weight: 600;
+        }
+
+        .table-note {
+            margin: 10px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .agent-box {
+            margin-top: 16px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface-soft);
+            overflow: hidden;
+        }
+
+        .agent-toggle {
+            width: 100%;
+            min-height: 46px;
+            padding: 11px 14px;
+            border: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            font-weight: 800;
+        }
+
+        .agent-toggle:hover {
+            background: #eef5ff;
+        }
+
+        .agent-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .bolt {
+            width: 20px;
+            height: 20px;
+            display: inline-grid;
+            place-items: center;
+            border-radius: 6px;
+            background: #dbeafe;
+            color: var(--blue);
+            font-size: 13px;
+        }
+
+        .chevron {
+            transition: transform 0.2s ease;
+            color: var(--muted);
+        }
+
+        .agent-box.expanded .chevron {
+            transform: rotate(180deg);
+        }
+
+        .agent-body {
+            display: none;
+            padding: 0 16px 16px;
+            color: #334155;
+        }
+
+        .agent-box.expanded .agent-body {
+            display: block;
+        }
+
+        .agent-body-inner {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 13px;
+        }
+
+        .agent-body ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .agent-body li + li {
+            margin-top: 6px;
+        }
+
+        .api-note {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+
+        .splitter {
+            border: 0;
+            border-top: 2px dashed #cbd5e1;
+            margin: 30px 0;
+        }
+
+        .charts {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 14px;
+        }
+
+        .chart-panel {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 14px;
+            background: var(--surface);
+        }
+
+        .chart-title {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 8px;
+            color: #334155;
+            font-weight: 800;
+        }
+
+        .chart {
+            width: 100%;
+            height: 310px;
+        }
+
+        #surplusChart {
+            height: 260px;
+        }
+
+        .empty-state {
+            padding: 42px 16px;
+            text-align: center;
+            color: var(--muted);
+        }
+
+        @media (max-width: 980px) {
+            .app {
+                width: min(100% - 24px, 1440px);
+                padding-top: 16px;
+            }
+
+            .app-header,
+            .board-heading {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .meta {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .metrics {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .field,
+            .field input,
+            .field select {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .controls {
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .metrics {
+                grid-template-columns: 1fr;
+            }
+
+            .board {
+                padding: 14px;
+            }
+
+            .brand h1 {
+                font-size: 23px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="app-header">
+            <div class="brand">
+                <h1>智耗管家</h1>
+                <p>振武医院耗材筛选统计系统</p>
+            </div>
+            <div class="meta" id="dataMeta">等待上传器生成 DashboardData.js。</div>
+        </header>
+
+        <section class="board" aria-labelledby="ledgerTitle">
+            <div class="board-heading">
+                <div class="board-title">
+                    <span class="accent"></span>
+                    <h2 id="ledgerTitle">各卫材 / 规格 / 批号明细台账</h2>
+                </div>
+                <div class="controls">
+                    <label class="field">
+                        <span>开始日期</span>
+                        <input type="date" id="startDate">
+                    </label>
+                    <label class="field">
+                        <span>结束日期</span>
+                        <input type="date" id="endDate">
+                    </label>
+                    <label class="field">
+                        <span>卫材名称</span>
+                        <select id="ledgerMaterialSelect"></select>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ledgerShowBatch" checked>
+                        <span>显示批号</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ledgerSpecSort">
+                        <span>规格排序</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="metrics" aria-label="统计概览">
+                <div class="metric in">
+                    <span>入库数量</span>
+                    <strong id="metricInbound">0</strong>
+                </div>
+                <div class="metric out">
+                    <span>发药数量</span>
+                    <strong id="metricDispense">0</strong>
+                </div>
+                <div class="metric return">
+                    <span>退药数量</span>
+                    <strong id="metricReturn">0</strong>
+                </div>
+                <div class="metric surplus">
+                    <span>盈余数量</span>
+                    <strong id="metricSurplus">0</strong>
+                </div>
+                <div class="metric">
+                    <span>明细组合</span>
+                    <strong id="metricRows">0</strong>
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table id="ledgerTable">
+                    <thead>
+                        <tr>
+                            <th>月份</th>
+                            <th>名称</th>
+                            <th>规格</th>
+                            <th class="batch-cell">批号</th>
+                            <th class="num">入库</th>
+                            <th class="num">发药</th>
+                            <th class="num">退药</th>
+                            <th class="num">盈余</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ledgerBody">
+                        <tr><td colspan="8" class="empty-state">暂无数据</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="table-note" id="ledgerNote"></div>
+
+            <div class="agent-box expanded" id="globalAgentBox">
+                <button class="agent-toggle" type="button" data-target="globalAgentBox" aria-expanded="true">
+                    <span class="agent-label"><span class="bolt">A</span>全局台账 Agent 洞察</span>
+                    <span class="chevron">⌄</span>
+                </button>
+                <div class="agent-body">
+                    <div class="agent-body-inner" id="globalAgentBody"></div>
+                </div>
+            </div>
+        </section>
+
+        <hr class="splitter">
+
+        <section class="board" aria-labelledby="trendTitle">
+            <div class="board-heading">
+                <div class="board-title">
+                    <span class="accent indigo"></span>
+                    <h2 id="trendTitle">单品盈余与流转趋势</h2>
+                </div>
+                <div class="controls">
+                    <label class="field">
+                        <span>卫材名称</span>
+                        <select id="materialSelect"></select>
+                    </label>
+                </div>
+            </div>
+
+            <div class="charts">
+                <div class="chart-panel">
+                    <div class="chart-title">
+                        <span>月度流转数量</span>
+                        <span class="hint">柱状图：入库、发药、退药</span>
+                    </div>
+                    <div id="flowChart" class="chart"></div>
+                </div>
+                <div class="chart-panel">
+                    <div class="chart-title">
+                        <span>盈余趋势</span>
+                        <span class="hint">折线图：按流水推算的累计盈余</span>
+                    </div>
+                    <div id="surplusChart" class="chart"></div>
+                </div>
+            </div>
+
+            <div class="agent-box expanded" id="trendAgentBox">
+                <button class="agent-toggle" type="button" data-target="trendAgentBox" aria-expanded="true">
+                    <span class="agent-label"><span class="bolt">A</span>Agent 单品趋势分析</span>
+                    <span class="chevron">⌄</span>
+                </button>
+                <div class="agent-body">
+                    <div class="agent-body-inner" id="trendAgentBody"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        (function () {
+            var dashboardData = window.ZHIHAO_DASHBOARD_DATA || { rows: [] };
+            var agentSettings = window.ZHIHAO_AGENT_SETTINGS || {};
+            var sourceRows = dashboardData.rows || [];
+            var useSourceSurplus = sourceRows.some(function (row) {
+                return Object.prototype.hasOwnProperty.call(row, "surplus");
+            });
+            var rows = normalizeRows(sourceRows);
+            var flowChart = null;
+            var surplusChart = null;
+
+            var els = {
+                dataMeta: document.getElementById("dataMeta"),
+                startDate: document.getElementById("startDate"),
+                endDate: document.getElementById("endDate"),
+                metricInbound: document.getElementById("metricInbound"),
+                metricDispense: document.getElementById("metricDispense"),
+                metricReturn: document.getElementById("metricReturn"),
+                metricSurplus: document.getElementById("metricSurplus"),
+                metricRows: document.getElementById("metricRows"),
+                ledgerTable: document.getElementById("ledgerTable"),
+                ledgerBody: document.getElementById("ledgerBody"),
+                ledgerNote: document.getElementById("ledgerNote"),
+                ledgerMaterialSelect: document.getElementById("ledgerMaterialSelect"),
+                ledgerShowBatch: document.getElementById("ledgerShowBatch"),
+                ledgerSpecSort: document.getElementById("ledgerSpecSort"),
+                materialSelect: document.getElementById("materialSelect"),
+                globalAgentBody: document.getElementById("globalAgentBody"),
+                trendAgentBody: document.getElementById("trendAgentBody")
+            };
+
+            function init() {
+                bindEvents();
+                initDateInputs();
+                initMaterialSelect();
+                renderAll();
+            }
+
+            function bindEvents() {
+                els.startDate.addEventListener("change", renderAll);
+                els.endDate.addEventListener("change", renderAll);
+                els.ledgerMaterialSelect.addEventListener("change", renderAll);
+                els.ledgerShowBatch.addEventListener("change", renderAll);
+                els.ledgerSpecSort.addEventListener("change", renderAll);
+                els.materialSelect.addEventListener("change", renderTrend);
+
+                Array.prototype.forEach.call(document.querySelectorAll(".agent-toggle"), function (button) {
+                    button.addEventListener("click", function () {
+                        var target = document.getElementById(button.getAttribute("data-target"));
+                        if (!target) return;
+                        target.classList.toggle("expanded");
+                        button.setAttribute("aria-expanded", target.classList.contains("expanded") ? "true" : "false");
+                    });
+                });
+
+                window.addEventListener("resize", function () {
+                    if (flowChart) flowChart.resize();
+                    if (surplusChart) surplusChart.resize();
+                });
+            }
+
+            function initDateInputs() {
+                if (!rows.length) {
+                    els.dataMeta.textContent = "未检测到看板数据，请先在上传器中点击“分析”。";
+                    return;
+                }
+
+                var minDate = dashboardData.minDate || rows[0].monthDate;
+                var maxDate = dashboardData.defaultEndDate || addMonths(maxBy(rows, "monthDate").monthDate, 1);
+                els.startDate.min = minDate;
+                els.startDate.max = maxDate;
+                els.endDate.min = minDate;
+                els.endDate.max = maxDate;
+                els.startDate.value = minDate;
+                els.endDate.value = maxDate;
+                els.ledgerSpecSort.checked = Boolean(dashboardData.defaultSpecSort);
+
+                els.dataMeta.innerHTML = [
+                    "生成时间：", escapeHtml(dashboardData.generatedAt || "未知"),
+                    "<br>数据月份：", escapeHtml(minDate.slice(0, 7)), " 至 ", escapeHtml(addMonths(maxDate, -1).slice(0, 7)),
+                    "<br>明细组合：", formatNumber(rows.length)
+                ].join("");
+            }
+
+            function initMaterialSelect() {
+                var names = unique(rows.map(function (row) { return row.name; })).sort(localeSort);
+                var hasEmpty = names.indexOf("") >= 0;
+                els.ledgerMaterialSelect.innerHTML = "";
+                els.materialSelect.innerHTML = "";
+                appendOption(els.ledgerMaterialSelect, "__all__", "所有卫材");
+                appendOption(els.materialSelect, "__all__", "所有卫材");
+                if (hasEmpty) {
+                    appendOption(els.ledgerMaterialSelect, "__empty__", "(空名称)");
+                    appendOption(els.materialSelect, "__empty__", "(空名称)");
+                }
+                names.forEach(function (name) {
+                    if (name !== "") {
+                        appendOption(els.ledgerMaterialSelect, name, name);
+                        appendOption(els.materialSelect, name, name);
+                    }
+                });
+            }
+
+            function appendOption(select, value, text) {
+                var option = document.createElement("option");
+                option.value = value;
+                option.textContent = text;
+                select.appendChild(option);
+            }
+
+            function renderAll() {
+                var filtered = getFilteredRows();
+                var ledgerRows = getLedgerRows(filtered);
+                renderSummary(ledgerRows);
+                renderLedger(ledgerRows);
+                renderAgentPanel(els.globalAgentBody, getLedgerScopeLabel(), ledgerRows);
+                renderTrend();
+            }
+
+            function renderTrend() {
+                var filtered = aggregateLedgerRows(getTrendRows(getFilteredRows()), true);
+                renderCharts(filtered);
+                var selected = els.materialSelect.value;
+                var label = selected === "__all__" ? "所有卫材" : selected === "__empty__" ? "(空名称)" : selected;
+                renderAgentPanel(els.trendAgentBody, label + "趋势", filtered);
+            }
+
+            function getFilteredRows() {
+                if (!rows.length) return [];
+                var start = els.startDate.value ? new Date(els.startDate.value + "T00:00:00") : null;
+                var end = els.endDate.value ? new Date(els.endDate.value + "T00:00:00") : null;
+                return rows.filter(function (row) {
+                    var date = new Date(row.monthDate + "T00:00:00");
+                    return (!start || date >= start) && (!end || date < end);
+                });
+            }
+
+            function getTrendRows(baseRows) {
+                var selected = els.materialSelect.value;
+                if (selected === "__all__") return baseRows;
+                if (selected === "__empty__") {
+                    return baseRows.filter(function (row) { return row.name === ""; });
+                }
+                return baseRows.filter(function (row) { return row.name === selected; });
+            }
+
+            function getLedgerRows(baseRows) {
+                var selected = els.ledgerMaterialSelect.value;
+                var filtered = baseRows;
+                if (selected === "__empty__") {
+                    filtered = baseRows.filter(function (row) { return row.name === ""; });
+                } else if (selected && selected !== "__all__") {
+                    filtered = baseRows.filter(function (row) { return row.name === selected; });
+                }
+
+                return aggregateLedgerRows(filtered, els.ledgerShowBatch.checked, els.ledgerSpecSort.checked);
+            }
+
+            function getLedgerScopeLabel() {
+                var selected = els.ledgerMaterialSelect.value;
+                var label = selected === "__all__" ? "全局台账" : selected === "__empty__" ? "(空名称)台账" : selected + "台账";
+                if (!els.ledgerShowBatch.checked) label += "（批号合并）";
+                if (els.ledgerSpecSort.checked) label += "（规格排序）";
+                return label;
+            }
+
+            function aggregateLedgerRows(baseRows, includeBatch, sortBySpec) {
+                var map = {};
+                baseRows.forEach(function (row) {
+                    var key = [row.month, row.name, row.spec, includeBatch ? row.batch : ""].join("\u001f");
+                    if (!map[key]) {
+                        map[key] = {
+                            month: row.month,
+                            monthDate: row.monthDate,
+                            name: row.name,
+                            spec: row.spec,
+                            batch: includeBatch ? row.batch : "",
+                            inbound: 0,
+                            dispense: 0,
+                            returnQty: 0,
+                            surplus: 0
+                        };
+                    }
+                    map[key].inbound += row.inbound;
+                    map[key].dispense += row.dispense;
+                    map[key].returnQty += row.returnQty;
+                    map[key].surplus += row.surplus;
+                });
+
+                var aggregated = sortLedgerRows(Object.keys(map).map(function (key) { return map[key]; }), sortBySpec);
+                return useSourceSurplus ? aggregated : recalculateRunningSurplus(aggregated, includeBatch);
+            }
+
+            function sortLedgerRows(ledgerRows, sortBySpec) {
+                return ledgerRows.sort(function (a, b) {
+                    var result = 0;
+                    if (sortBySpec) {
+                        result = localeSort(a.spec, b.spec);
+                        if (result) return result;
+                        result = localeSort(a.name, b.name);
+                        if (result) return result;
+                        result = localeSort(a.batch, b.batch);
+                        if (result) return result;
+                        return a.month.localeCompare(b.month);
+                    }
+                    result = a.month.localeCompare(b.month);
+                    if (result) return result;
+                    result = localeSort(a.name, b.name);
+                    if (result) return result;
+                    result = localeSort(a.spec, b.spec);
+                    if (result) return result;
+                    return localeSort(a.batch, b.batch);
+                });
+            }
+
+            function recalculateRunningSurplus(aggregatedRows, includeBatch) {
+                var groups = {};
+                aggregatedRows.forEach(function (row) {
+                    var key = [row.name, row.spec, includeBatch ? row.batch : ""].join("\u001f");
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                Object.keys(groups).forEach(function (key) {
+                    var group = groups[key].sort(function (a, b) { return a.month.localeCompare(b.month); });
+                    var running = 0;
+                    var previousMonth = "";
+                    group.forEach(function (row) {
+                        if (previousMonth && row.month !== addMonths(previousMonth + "-01", 1).slice(0, 7)) {
+                            running = 0;
+                        }
+                        running += row.inbound - row.dispense + row.returnQty;
+                        row.surplus = round2(running);
+                        previousMonth = row.month;
+                    });
+                });
+
+                return aggregatedRows;
+            }
+
+            function renderSummary(filtered) {
+                var totals = summarize(filtered);
+                els.metricInbound.textContent = formatNumber(totals.inbound);
+                els.metricDispense.textContent = formatNumber(totals.dispense);
+                els.metricReturn.textContent = formatNumber(totals.returnQty);
+                els.metricSurplus.textContent = formatNumber(totals.surplus);
+                els.metricRows.textContent = formatNumber(filtered.length);
+            }
+
+            function renderLedger(filtered) {
+                var includeBatch = els.ledgerShowBatch.checked;
+                els.ledgerTable.classList.toggle("hide-batch", !includeBatch);
+
+                if (!filtered.length) {
+                    els.ledgerBody.innerHTML = "<tr><td colspan=\"" + (includeBatch ? "8" : "7") + "\" class=\"empty-state\">当前时间范围没有数据</td></tr>";
+                    els.ledgerNote.textContent = "";
+                    return;
+                }
+
+                var limit = 800;
+                var page = filtered.slice(0, limit);
+                els.ledgerBody.innerHTML = page.map(function (row) {
+                    var nameHtml = row.name
+                        ? "<span class=\"name-cell\">" + escapeHtml(row.name) + "</span>"
+                        : "<span class=\"empty-name\">(空名称)</span>";
+                    return [
+                        "<tr>",
+                        "<td>", escapeHtml(row.month), "</td>",
+                        "<td>", nameHtml, "</td>",
+                        "<td>", escapeHtml(row.spec || "-"), "</td>",
+                        includeBatch ? "<td class=\"batch-cell\">" + escapeHtml(row.batch || "-") + "</td>" : "",
+                        "<td class=\"num\">", formatNumber(row.inbound), "</td>",
+                        "<td class=\"num\">", formatNumber(row.dispense), "</td>",
+                        "<td class=\"num\">", formatNumber(row.returnQty), "</td>",
+                        "<td class=\"num\">", formatNumber(row.surplus), "</td>",
+                        "</tr>"
+                    ].join("");
+                }).join("");
+
+                els.ledgerNote.textContent = filtered.length > limit
+                    ? "已显示前 " + limit + " 行，共 " + filtered.length + " 行；完整结果可通过上传器导出 Excel 表格。"
+                    : "已显示 " + filtered.length + " 行。" + (includeBatch ? "" : " 已按同一月份、名称、规格合并批号。");
+            }
+
+            function renderCharts(filtered) {
+                var series = aggregateByMonth(filtered);
+                if (!window.echarts) {
+                    document.getElementById("flowChart").innerHTML = "<div class=\"empty-state\">ECharts 未加载，无法显示柱状图。</div>";
+                    document.getElementById("surplusChart").innerHTML = "<div class=\"empty-state\">ECharts 未加载，无法显示折线图。</div>";
+                    return;
+                }
+
+                if (!flowChart) flowChart = echarts.init(document.getElementById("flowChart"));
+                if (!surplusChart) surplusChart = echarts.init(document.getElementById("surplusChart"));
+
+                if (!series.months.length) {
+                    flowChart.clear();
+                    surplusChart.clear();
+                    return;
+                }
+
+                flowChart.setOption({
+                    color: ["#059669", "#d97706", "#e11d48"],
+                    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+                    legend: { top: 0, data: ["入库", "发药", "退药"] },
+                    grid: { top: 46, left: 58, right: 22, bottom: 42 },
+                    xAxis: { type: "category", data: series.months, axisTick: { alignWithLabel: true } },
+                    yAxis: { type: "value", name: "数量", splitLine: { lineStyle: { color: "#edf2f7" } } },
+                    series: [
+                        { name: "入库", type: "bar", barMaxWidth: 24, data: series.inbound },
+                        { name: "发药", type: "bar", barMaxWidth: 24, data: series.dispense },
+                        { name: "退药", type: "bar", barMaxWidth: 24, data: series.returnQty }
+                    ]
+                }, true);
+
+                surplusChart.setOption({
+                    color: ["#2563eb"],
+                    tooltip: { trigger: "axis" },
+                    grid: { top: 28, left: 58, right: 22, bottom: 42 },
+                    xAxis: { type: "category", data: series.months, boundaryGap: false },
+                    yAxis: { type: "value", name: "累计盈余", splitLine: { lineStyle: { color: "#edf2f7" } } },
+                    series: [
+                        {
+                            name: "盈余趋势",
+                            type: "line",
+                            smooth: true,
+                            symbolSize: 8,
+                            lineStyle: { width: 3 },
+                            areaStyle: { color: "rgba(37, 99, 235, 0.10)" },
+                            data: series.cumulativeSurplus
+                        }
+                    ]
+                }, true);
+            }
+
+            function renderAgentPanel(container, scope, scopedRows) {
+                var version = (Number(container.getAttribute("data-agent-version")) || 0) + 1;
+                container.setAttribute("data-agent-version", String(version));
+                var localHtml = buildLocalInsightHtml(scope, scopedRows);
+                container.innerHTML = localHtml + buildApiNote("本地规则洞察已生成。");
+
+                if (!agentSettings.enabled || !agentSettings.endpoint) {
+                    return;
+                }
+
+                requestExternalAgent(scope, scopedRows).then(function (html) {
+                    if (String(version) !== container.getAttribute("data-agent-version")) return;
+                    container.innerHTML = localHtml + buildApiNote("外部 Agent 返回：") + html;
+                }).catch(function (error) {
+                    if (String(version) !== container.getAttribute("data-agent-version")) return;
+                    container.innerHTML = localHtml + buildApiNote("外部 Agent 请求失败：" + escapeHtml(error.message));
+                });
+            }
+
+            function buildLocalInsightHtml(scope, scopedRows) {
+                if (!scopedRows.length) {
+                    return "<p>当前范围没有可分析数据。</p>";
+                }
+
+                var totals = summarize(scopedRows);
+                var monthly = aggregateByMonth(scopedRows);
+                var anomalies = findAnomalies(scopedRows);
+                var bullets = [];
+
+                bullets.push(scope + "内入库 " + formatNumber(totals.inbound) + "，发药 " + formatNumber(totals.dispense) + "，退药 " + formatNumber(totals.returnQty) + "，本期盈余 " + formatNumber(totals.surplus) + "。");
+
+                if (monthly.dispense.length >= 3) {
+                    var stats = meanAndStd(monthly.dispense);
+                    if (stats.mean > 0 && stats.std / stats.mean < 0.25) {
+                        bullets.push("发药序列波动较小，存在较稳定的月度消耗周期，适合用近 3 个月均值做补货阈值。");
+                    } else if (stats.mean > 0) {
+                        bullets.push("发药序列波动较大，建议按规格和批号拆开复核科室领用或集中消耗月份。");
+                    }
+                } else {
+                    bullets.push("可用月份不足 3 个，周期性判断仅作为初筛。");
+                }
+
+                if (anomalies.length) {
+                    anomalies.slice(0, 5).forEach(function (item) {
+                        bullets.push("补货提醒：" + item.label + " 的累计盈余最近斜率异常下降，最近月净变化 " + formatNumber(item.lastSlope) + "，低于前期均值 " + formatNumber(item.previousAverage) + "。");
+                    });
+                } else {
+                    bullets.push("未发现明显的盈余曲线异常下滑组合；仍建议对高频发药规格设置人工安全库存。");
+                }
+
+                return "<ul>" + bullets.map(function (text) { return "<li>" + escapeHtml(text) + "</li>"; }).join("") + "</ul>";
+            }
+
+            function requestExternalAgent(scope, scopedRows) {
+                var payload = {
+                    task: "分析卫材时间序列周期性，并在某批次或规格的盈余曲线斜率异常下降时提醒补货。",
+                    scope: scope,
+                    generatedAt: dashboardData.generatedAt || "",
+                    dateRange: { start: els.startDate.value, endExclusive: els.endDate.value },
+                    totals: summarize(scopedRows),
+                    rows: scopedRows.slice(0, 1500)
+                };
+
+                var headers = { "Content-Type": "application/json" };
+                if (agentSettings.apiKey && agentSettings.apiKeyHeader) {
+                    headers[agentSettings.apiKeyHeader] = (agentSettings.apiKeyPrefix || "") + agentSettings.apiKey;
+                }
+
+                var controller = new AbortController();
+                var timeout = window.setTimeout(function () { controller.abort(); }, agentSettings.timeoutMs || 30000);
+                return fetch(agentSettings.endpoint, {
+                    method: agentSettings.method || "POST",
+                    headers: headers,
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                }).then(function (response) {
+                    return response.text().then(function (text) {
+                        window.clearTimeout(timeout);
+                        if (!response.ok) {
+                            throw new Error("HTTP " + response.status + " " + text.slice(0, 120));
+                        }
+                        return formatExternalAgentResponse(text);
+                    });
+                });
+            }
+
+            function formatExternalAgentResponse(text) {
+                var parsed = null;
+                try { parsed = JSON.parse(text); } catch (error) { }
+
+                if (!parsed) {
+                    return "<div class=\"api-note\">" + escapeHtml(text) + "</div>";
+                }
+
+                if (Array.isArray(parsed.insights)) {
+                    return "<ul>" + parsed.insights.map(function (item) {
+                        return "<li>" + escapeHtml(String(item)) + "</li>";
+                    }).join("") + "</ul>";
+                }
+
+                var output = parsed.summary || parsed.result || parsed.output_text || parsed.message || JSON.stringify(parsed);
+                return "<div class=\"api-note\">" + escapeHtml(String(output)) + "</div>";
+            }
+
+            function buildApiNote(text) {
+                var suffix = agentSettings.enabled && agentSettings.endpoint
+                    ? " 已启用 AgentSettings.js 外部接口。"
+                    : " 如需切换为外部 Agent，请编辑 AgentSettings.js。";
+                return "<div class=\"api-note\">" + text + suffix + "</div>";
+            }
+
+            function findAnomalies(scopedRows) {
+                var months = unique(scopedRows.map(function (row) { return row.month; })).sort();
+                if (months.length < 2) return [];
+
+                var groups = {};
+                scopedRows.forEach(function (row) {
+                    var key = [row.name, row.spec, row.batch].join("\u001f");
+                    if (!groups[key]) {
+                        groups[key] = { label: labelFor(row), byMonth: {}, inbound: 0 };
+                    }
+                    groups[key].byMonth[row.month] = row.surplus;
+                    groups[key].inbound += row.inbound;
+                });
+
+                var anomalies = [];
+                Object.keys(groups).forEach(function (key) {
+                    var group = groups[key];
+                    var balances = months.map(function (month) {
+                        return Object.prototype.hasOwnProperty.call(group.byMonth, month) ? group.byMonth[month] : null;
+                    });
+                    var slopes = [];
+                    for (var i = 1; i < balances.length; i++) {
+                        if (balances[i] !== null && balances[i - 1] !== null) {
+                            slopes.push(balances[i] - balances[i - 1]);
+                        }
+                    }
+                    if (slopes.length < 2) return;
+
+                    var previous = slopes.slice(0, -1);
+                    var previousAverage = previous.reduce(function (sum, value) { return sum + value; }, 0) / previous.length;
+                    var lastSlope = slopes[slopes.length - 1];
+                    var threshold = Math.max(Math.abs(previousAverage) * 0.5, 1);
+                    if (lastSlope < 0 && lastSlope < previousAverage - threshold) {
+                        anomalies.push({
+                            label: group.label,
+                            lastSlope: lastSlope,
+                            previousAverage: previousAverage,
+                            severity: Math.abs(lastSlope - previousAverage)
+                        });
+                    }
+                });
+
+                anomalies.sort(function (a, b) { return b.severity - a.severity; });
+                return anomalies;
+            }
+
+            function aggregateByMonth(scopedRows) {
+                var map = {};
+                scopedRows.forEach(function (row) {
+                    if (!map[row.month]) {
+                        map[row.month] = { inbound: 0, dispense: 0, returnQty: 0, surplus: 0 };
+                    }
+                    map[row.month].inbound += row.inbound;
+                    map[row.month].dispense += row.dispense;
+                    map[row.month].returnQty += row.returnQty;
+                    map[row.month].surplus += row.surplus;
+                });
+
+                var months = Object.keys(map).sort();
+
+                return {
+                    months: months,
+                    inbound: months.map(function (month) { return round2(map[month].inbound); }),
+                    dispense: months.map(function (month) { return round2(map[month].dispense); }),
+                    returnQty: months.map(function (month) { return round2(map[month].returnQty); }),
+                    surplus: months.map(function (month) { return round2(map[month].surplus); }),
+                    cumulativeSurplus: months.map(function (month) { return round2(map[month].surplus); })
+                };
+            }
+
+            function summarize(scopedRows) {
+                var latestByGroup = {};
+                var total = scopedRows.reduce(function (summary, row) {
+                    summary.inbound += row.inbound;
+                    summary.dispense += row.dispense;
+                    summary.returnQty += row.returnQty;
+                    var key = [row.name, row.spec, row.batch].join("\u001f");
+                    if (!latestByGroup[key] || row.month > latestByGroup[key].month) {
+                        latestByGroup[key] = row;
+                    }
+                    return summary;
+                }, { inbound: 0, dispense: 0, returnQty: 0, surplus: 0 });
+
+                Object.keys(latestByGroup).forEach(function (key) {
+                    total.surplus += latestByGroup[key].surplus;
+                });
+                return total;
+            }
+
+            function normalizeRows(inputRows) {
+                return inputRows.map(function (row) {
+                    return {
+                        month: String(row.month || ""),
+                        monthDate: String(row.monthDate || (row.month ? row.month + "-01" : "")),
+                        name: String(row.name || ""),
+                        spec: String(row.spec || ""),
+                        batch: String(row.batch || ""),
+                        inbound: Number(row.inbound || 0),
+                        dispense: Number(row.dispense || 0),
+                        returnQty: Number(row.returnQty || 0),
+                        surplus: Number(row.surplus || 0)
+                    };
+                }).sort(function (a, b) {
+                    return a.month.localeCompare(b.month) ||
+                        localeSort(a.name, b.name) ||
+                        localeSort(a.spec, b.spec) ||
+                        localeSort(a.batch, b.batch);
+                });
+            }
+
+            function labelFor(row) {
+                return (row.name || "(空名称)") + " / " + (row.spec || "-") + " / " + (row.batch || "-");
+            }
+
+            function unique(values) {
+                var seen = {};
+                var result = [];
+                values.forEach(function (value) {
+                    var key = String(value);
+                    if (!Object.prototype.hasOwnProperty.call(seen, key)) {
+                        seen[key] = true;
+                        result.push(value);
+                    }
+                });
+                return result;
+            }
+
+            function meanAndStd(values) {
+                var mean = values.reduce(function (sum, value) { return sum + value; }, 0) / values.length;
+                var variance = values.reduce(function (sum, value) {
+                    var diff = value - mean;
+                    return sum + diff * diff;
+                }, 0) / values.length;
+                return { mean: mean, std: Math.sqrt(variance) };
+            }
+
+            function maxBy(items, field) {
+                return items.reduce(function (best, item) {
+                    return item[field] > best[field] ? item : best;
+                }, items[0]);
+            }
+
+            function addMonths(dateString, count) {
+                var date = new Date(dateString + "T00:00:00");
+                date.setMonth(date.getMonth() + count);
+                return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+            }
+
+            function pad(value) {
+                return String(value).padStart(2, "0");
+            }
+
+            function formatNumber(value) {
+                return round2(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+            }
+
+            function round2(value) {
+                return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+            }
+
+            function localeSort(a, b) {
+                return String(a || "").localeCompare(String(b || ""), "zh-CN");
+            }
+
+            function escapeHtml(value) {
+                return String(value == null ? "" : value)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#39;");
+            }
+
+            document.addEventListener("DOMContentLoaded", init);
+        })();
+    </script>
+</body>
+</html>
